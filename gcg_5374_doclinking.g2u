@@ -1,0 +1,323 @@
+Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+v.Local.sPath.Declare
+v.Local.sFile.Declare
+v.Local.sData.Declare
+v.Local.sSheet.Declare
+v.Local.sRows.Declare
+v.Local.sFrags.Declare
+v.Local.iCount.Declare
+
+
+f.Intrinsic.UI.ShowOpenFileDialog("","*.xlsx|*.xlsx",v.Caller.GlobalDir,v.Local.sFile)
+
+f.Intrinsic.Control.If(v.Local.sFile,<>,v.Ambient.cancel)
+	'open a connection
+	f.ODBC.Connection!coredb.opencompanyconnection
+	'create a stringbuild object for a log file
+	f.Intrinsic.stringbuilder.create("LOG")
+	'read in the file
+	f.Automation.MSExcel.ReadSpreadsheet(v.Local.sFile,5,20000,v.Local.sData)
+	'split the sheets
+	f.Intrinsic.String.Split(v.Local.sData,"&^&",v.Local.sSheet)
+	'split in to rows
+	f.Intrinsic.String.Split(v.Local.sSheet(0),"$!$",v.Local.sRows)
+	'the rows have been split to an array of records.  Loop through and validate each part and write the link.
+	f.Intrinsic.Control.For(v.Local.iCount,0,v.Local.sRows.UBound--,1)
+		f.Intrinsic.Control.If(v.Local.iCount,>,0)
+			f.Intrinsic.String.Split(v.Local.sRows(v.Local.iCount),"*!*",v.Local.sFrags)
+			'Frags(0) = part (or key value), frags(1) = file name, frags(2) = path, frag(3) = groupID( 1 if null), frag(4) = linktype (30 is default if null)
+			'group ID is 1 and link type is
+			f.Intrinsic.Control.If(v.Local.sFrags(0),>,"")
+				'first, check the type of the link
+				f.Intrinsic.Control.SelectCase(v.Local.sFrags(4))
+					f.Intrinsic.Control.Case(45)
+						'45 sales order
+						f.Intrinsic.Control.CallSub(link_sales_order,"ORDER",V.Local.sFrags(0),"FILE",V.Local.sFrags(1),"PATH",V.Local.sFrags(2),"GROUP",V.Local.sFrags(3))
+					f.Intrinsic.Control.Case(35)
+						'35 router estimate
+						f.Intrinsic.Control.CallSub(link_router_header,"ROUTER",V.Local.sFrags(0),"FILE",V.Local.sFrags(1),"PATH",V.Local.sFrags(2),"GROUP",V.Local.sFrags(3))
+					f.Intrinsic.Control.Case(60)
+						'60 purchase order
+						f.Intrinsic.Control.CallSub(link_purchase_order,"PO",V.Local.sFrags(0),"FILE",V.Local.sFrags(1),"PATH",V.Local.sFrags(2),"GROUP",V.Local.sFrags(3))
+					f.Intrinsic.Control.Case(15)
+						'15 customer master
+						f.Intrinsic.Control.CallSub(link_customer_master,"CUSTOMER",V.Local.sFrags(0),"FILE",V.Local.sFrags(1),"PATH",V.Local.sFrags(2),"GROUP",V.Local.sFrags(3))
+					f.Intrinsic.Control.Case(10)
+						'10 vendor master
+						f.Intrinsic.Control.CallSub(link_vendor_master,"VENDOR",V.Local.sFrags(0),"FILE",V.Local.sFrags(1),"PATH",V.Local.sFrags(2),"GROUP",V.Local.sFrags(3))
+					f.Intrinsic.Control.CaseElse
+						'30 inventory master or any blank values (this is the default)
+						f.Intrinsic.Control.CallSub(link_inventory_master,"PART",V.Local.sFrags(0),"FILE",V.Local.sFrags(1),"PATH",V.Local.sFrags(2),"GROUP",V.Local.sFrags(3))
+				f.Intrinsic.Control.EndSelect
+			f.Intrinsic.Control.Else
+				f.Intrinsic.Control.ExitFor(v.Local.iCount)
+			f.Intrinsic.Control.EndIf
+		f.Intrinsic.Control.EndIf
+
+	f.Intrinsic.Control.Next(v.Local.iCount)
+	f.Intrinsic.Control.CallSub(save_log)
+	f.ODBC.Connection!coredb.close
+f.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.End
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.Catching.Start
+v.Local.sError.declare(string)
+F.Intrinsic.String.Build("Project: {0}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}","gcg_5374_doclinking.g2u",V.Ambient.NewLine,v.Args.sub,V.Args.errorno,V.args.errordesc,V.Local.sError)
+f.Intrinsic.UI.Msgbox(v.Local.sError)
+Program.Sub.Catching.End
+
+Program.Sub.link_inventory_master.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+V.Local.sSql.Declare
+V.Local.sRet.Declare
+V.Local.sFile.Declare
+v.Local.iLink.Declare
+v.Local.sLink.Declare
+
+f.Intrinsic.String.Build("select distinct UCASE(RTIM(LTRIM(PART))) FROM V_INVENTORY_MSTR WHERE PART = '{0}'",V.Args.PART,V.Local.sSql)
+f.ODBC.Connection!coredb.executeandreturn(v.Local.sSql,v.Local.sRet)
+
+f.Intrinsic.Control.If(v.Local.sRet,=,v.Args.PART.Trim)
+	f.Global.DocumentControl.GetLinkID(v.Args.PART,30,V.Local.iLink)
+	F.Intrinsic.Control.If(V.Local.iLink,=,-1)
+		F.Global.DocumentControl.CreateReference(V.Args.PART,30,V.Local.iLink)
+		f.Intrinsic.String.Build("{0}\{1}",v.Args.PATH,V.Args.FILE,v.Local.sFile)
+		F.Global.DocumentControl.AddDocument(V.Local.iLink,v.Local.sFile,v.Args.FILE,1,V.Args.FILE.RIGHT3)
+	f.Intrinsic.Control.Else
+		f.Intrinsic.String.Build("{0}\{1}",v.Args.PATH,V.Args.FILE,v.Local.sFile)
+		f.Global.DocumentControl.AddDocument(V.Local.iLink,v.Local.sFile,v.Args.FILE,1,V.Args.FILE.RIGHT3)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Else
+	F.Intrinsic.StringBuilder.AppendLine("LOG","PART ",V.Args.PART," was not found in inventory")
+f.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.link_inventory_master.End
+
+Program.Sub.link_customer_master.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+V.Local.sSql.Declare
+V.Local.sRet.Declare
+V.Local.sFile.Declare
+v.Local.iLink.Declare
+v.Local.sLink.Declare
+
+F.Intrinsic.Control.If(V.Args.GROUP.IsNotNullOrWhiteSpace)
+	f.Intrinsic.String.Build("select customer from v_customer_master where customer = '{0}'",v.Args.customer,v.Local.sSql)
+	f.ODBC.Connection!coredb.executeandreturn(v.Local.sSql,v.Local.sRet)
+	f.Intrinsic.Control.If(v.Local.sRet.Trim,=,v.Args.customer.Trim)
+		f.Global.DocumentControl.GetLinkID(v.Args.CUSTOMER,15,V.Local.iLink)
+		F.Intrinsic.Control.If(V.Local.iLink,=,-1)
+			f.Global.DocumentControl.CreateReference(v.Args.CUSTOMER,15,v.Local.iLink)
+			f.Intrinsic.String.Build("{0}\{1}",v.Args.PATH,V.Args.FILE,v.Local.sFile)
+			F.Global.DocumentControl.AddDocument(V.Local.iLink,v.Local.sFile,v.Args.FILE,V.Args.GROUP,V.Args.FILE.RIGHT3)
+		F.Intrinsic.Control.Else
+			f.Intrinsic.String.Build("{0}\{1}",v.Args.PATH,V.Args.FILE,v.Local.sFile)
+			F.Global.DocumentControl.AddDocument(V.Local.iLink,v.Local.sFile,v.Args.FILE,V.Args.GROUP,V.Args.FILE.RIGHT3)
+		F.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.Else
+		f.Intrinsic.stringBuilder.AppendLine("LOG","CUSTOMER ",V.Args.CUSTOMER," was not found in the customer master")
+	f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.Else
+	f.Intrinsic.StringBuilder.AppendLine("LOG","CUSTOMER ",V.Args.CUSTOMER," and file ",v.Args.FILE," did not have a valid group assigned")
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.link_customer_master.End
+
+Program.Sub.link_vendor_master.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+V.Local.sSql.Declare
+V.Local.sRet.Declare
+V.Local.sFile.Declare
+v.Local.iLink.Declare
+v.Local.sLink.Declare
+
+f.Intrinsic.Control.If(v.Args.GROUP.IsNotNullOrWhiteSpace)
+	F.Intrinsic.String.Build("SELECT VENDOR FROM V_VENDOR_MASTER WHERE VENDOR = '{0}'",V.Args.VENDOR,v.Local.sSql)
+	f.ODBC.Connection!coredb.executeandreturn(v.Local.sSql,v.Local.sRet)
+	
+	f.Intrinsic.Control.If(v.Local.sRet,=,v.Args.VENDOR.Trim)
+		f.Global.DocumentControl.GetLinkID(v.Args.VENDOR,10,v.Local.iLink)
+		f.Intrinsic.Control.If(v.Local.iLink,=,-1)
+			f.Global.DocumentControl.CreateReference(v.Args.VENDOR,10,v.Local.iLink)
+			f.Intrinsic.String.Build("{0}\{1}",v.Args.PATH,V.Args.FILE,v.Local.sFile)
+			F.Global.DocumentControl.AddDocument(V.Local.iLink,v.Local.sFile,v.Args.FILE,V.Args.GROUP,V.Args.FILE.RIGHT3)
+		f.Intrinsic.Control.Else
+			f.Intrinsic.String.Build("{0}\{1}",v.Args.PATH,V.Args.FILE,v.Local.sFile)
+			f.Global.DocumentControl.AddDocument(V.Local.iLink,v.Local.sFile,v.Args.FILE,V.Args.GROUP,V.Args.FILE.RIGHT3)
+		f.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.Else
+		f.Intrinsic.StringBuilder.AppendLine("LOG","VENDOR ",v.Args.VENDOR," was not found in the vendor master")
+	f.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Else
+	F.Intrinsic.StringBuilder.AppendLine("LOG","VENDOR ",V.Args.VENDOR," and file ",v.Args.FILE," did not have a valid group assigned")
+f.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.link_vendor_master.End
+
+Program.Sub.link_purchase_order.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+V.Local.sSql.Declare
+V.Local.sRet.Declare
+V.Local.sFile.Declare
+v.Local.iLink.Declare
+v.Local.sLink.Declare
+v.Local.sPO.Declare
+
+f.Intrinsic.Control.If(v.Args.GROUP.IsNotNullOrWhiteSpace)
+	f.Intrinsic.String.LPad(v.Args.PO,"0",7,v.Local.sPO)
+	f.Intrinsic.String.Build("select purchase_order from v_po_header where purchase_order = '{0}'",v.Local.sPO,v.Local.sSql)
+	f.ODBC.Connection!coredb.executeandreturn(v.Local.sSql,v.Local.sRet)
+	
+	f.Intrinsic.Control.If(v.Local.sRet.Trim,=,v.Local.sPO.Trim)
+		f.Global.DocumentControl.GetLinkID(v.Local.sPO,60,v.Local.iLink)
+		f.Intrinsic.Control.If(v.Local.iLink,=,-1)
+			f.Global.DocumentControl.CreateReference(v.Local.sPO,60,v.Local.iLink)
+			f.Intrinsic.String.Build("{0}\{1}",v.Args.PATH,V.Args.FILE,v.Local.sFile)
+			F.Global.DocumentControl.AddDocument(V.Local.iLink,v.Local.sFile,v.Args.FILE,V.Args.GROUP,V.Args.FILE.RIGHT3)
+		f.Intrinsic.Control.Else
+			f.Intrinsic.String.Build("{0}\{1}",v.Args.PATH,V.Args.FILE,v.Local.sFile)
+			f.Global.DocumentControl.AddDocument(V.Local.iLink,v.Local.sFile,v.Args.FILE,V.Args.GROUP,V.Args.FILE.RIGHT3)			
+		f.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.Else
+		f.Intrinsic.StringBuilder.AppendLine("LOG","PURCHASE ORDER ",V.Local.sPO," was not found in the purchase order header table")
+	f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.Else
+	f.Intrinsic.stringBuilder.AppendLine("LOG","PURCHASE ORDER ",V.Args.PO," and file ",v.Args.FILE," did not have a valid group assigned")
+f.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.link_purchase_order.End
+
+Program.Sub.link_router_header.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+V.Local.sSql.Declare
+V.Local.sRet.Declare
+V.Local.sFile.Declare
+v.Local.iLink.Declare
+v.Local.sLink.Declare
+
+f.Intrinsic.Control.If(v.Args.GROUP.IsNotNullOrWhiteSpace)
+	F.Intrinsic.String.Build("select ROUTER from V_ROUTER_HEADER where ROUTER = '{0}'",V.Args.ROUTER,V.Local.sSql)
+	F.ODBC.Connection!coredb.executeandreturn(v.Local.sSql,v.Local.sRet)
+	
+	f.Intrinsic.Control.If(v.Local.sRet.Trim,=,v.Args.ROUTER.Trim)
+		f.Global.DocumentControl.GetLinkID(V.Args.ROUTER,35,v.Local.iLink)
+		f.Intrinsic.Control.If(v.Local.iLink,=,-1)
+			f.Global.DocumentControl.CreateReference(v.Args.ROUTER,35,v.Local.iLink)
+			f.Intrinsic.String.Build("{0}\{1}",v.Args.PATH,V.Args.FILE,v.Local.sFile)
+			F.Global.DocumentControl.AddDocument(V.Local.iLink,v.Local.sFile,v.Args.FILE,V.Args.GROUP,V.Args.FILE.RIGHT3)
+		f.Intrinsic.Control.Else
+			f.Intrinsic.String.Build("{0}\{1}",v.Args.PATH,V.Args.FILE,v.Local.sFile)
+			f.Global.DocumentControl.AddDocument(V.Local.iLink,v.Local.sFile,v.Args.FILE,V.Args.GROUP,V.Args.FILE.RIGHT3)			
+		f.Intrinsic.Control.EndIf		
+	f.Intrinsic.Control.Else
+		f.Intrinsic.StringBuilder.AppendLine("LOG","ROUTER ",V.Args.ROUTER," was not found in the router header table")
+	f.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Else
+	F.Intrinsic.StringBuilder.AppendLine("LOG","ROUTER ",V.Args.ROUTER," and file ",V.Args.FILE," did not have a valid group assigned")
+f.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.link_router_header.End
+
+Program.Sub.link_sales_order.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+V.Local.sSql.Declare
+V.Local.sRet.Declare
+V.Local.sFile.Declare
+v.Local.iLink.Declare
+v.Local.sLink.Declare
+V.Local.sOrder.Declare
+
+f.Intrinsic.Control.If(v.Args.GROUP.IsNotNullOrWhiteSpace)
+	F.Intrinsic.String.LPad(V.Args.ORDER,"0",7,V.Local.sOrder)
+	F.Intrinsic.String.Build("select ORDER_NO from V_ORDER_HEADER where ORDER_NO = '{0}'",V.Local.sOrder,V.Local.sSql)
+	F.ODBC.Connection!coredb.executeandreturn(v.Local.sSql,v.Local.sRet)
+	
+	f.Intrinsic.Control.If(v.Local.sRet.Trim,=,v.Local.sOrder.Trim)
+		f.Global.DocumentControl.GetLinkID(V.local.sOrder,45,v.Local.iLink)
+		f.Intrinsic.Control.If(v.Local.iLink,=,-1)
+			f.Global.DocumentControl.CreateReference(v.Local.sOrder,45,v.Local.iLink)
+			f.Intrinsic.String.Build("{0}\{1}",v.Args.PATH,V.Args.FILE,v.Local.sFile)
+			F.Global.DocumentControl.AddDocument(V.Local.iLink,v.Local.sFile,v.Args.FILE,V.Args.GROUP,V.Args.FILE.RIGHT3)
+		f.Intrinsic.Control.Else
+			f.Intrinsic.String.Build("{0}\{1}",v.Args.PATH,V.Args.FILE,v.Local.sFile)
+			f.Global.DocumentControl.AddDocument(V.Local.iLink,v.Local.sFile,v.Args.FILE,V.Args.GROUP,V.Args.FILE.RIGHT3)			
+		f.Intrinsic.Control.EndIf		
+	f.Intrinsic.Control.Else
+		f.Intrinsic.StringBuilder.AppendLine("LOG","ORDER ",v.Local.sOrder," was not found in the order header table")
+	f.Intrinsic.Control.EndIf	
+f.Intrinsic.Control.Else
+	f.Intrinsic.stringBuilder.AppendLine("LOG","ORDER ",V.Args.ORDER," and file ",V.Args.FILE," did not have a valid group assigned")
+f.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.link_sales_order.End
+
+Program.Sub.save_log.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+v.Local.sFile.Declare
+v.Local.sData.Declare
+
+f.Intrinsic.String.Build("{0}\{1}{2}.txt",v.Caller.GlobalDir,v.Caller.User.Trim,"document log",v.Local.sFile)
+f.Intrinsic.StringBuilder.ToString("LOG",v.Local.sData)
+F.Intrinsic.Control.If(V.Local.sData.Length,>,0)
+	f.Intrinsic.File.String2File(v.Local.sFile,v.Local.sData)
+	f.Intrinsic.Task.ShellExec(0,"OPEN",V.Local.sFile,"","",0)
+F.Intrinsic.Control.Else
+	F.Intrinsic.UI.Msgbox("Complete!")
+F.Intrinsic.Control.EndIf
+
+f.Intrinsic.stringbuilder.dispose("LOG")
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.save_log.End
